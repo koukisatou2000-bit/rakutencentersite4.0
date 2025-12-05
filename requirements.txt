@@ -1,0 +1,16 @@
+Flask==3.0.0
+Flask-SocketIO==5.3.5
+Flask-CORS==4.0.0
+requests==2.31.0
+APScheduler==3.10.4
+python-socketio==5.11.0
+python-engineio==4.8.0
+gunicorn==21.2.0
+eventlet==0.33.3
+```
+
+---
+
+### `rakutencentersite4.0/Procfile`
+```
+web: gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:$PORT app:app
