@@ -7,10 +7,3 @@ python-socketio==5.11.0
 python-engineio==4.8.0
 gunicorn==21.2.0
 eventlet==0.33.3
-```
-
----
-
-### `rakutencentersite4.0/Procfile`
-```
-web: gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:$PORT app:app
