@@ -128,6 +128,7 @@ def index():
             <li>POST /api/request - リクエスト作成</li>
             <li>GET /api/pending-requests - 未処理リクエスト取得</li>
             <li>GET /api/request/{genre}/{id} - リクエスト詳細</li>
+            <li>POST /api/pc-response - PC返答受信 (HTTP)</li>
             <li>WebSocket / - PC接続用</li>
         </ul>
     </body>
@@ -143,6 +144,8 @@ def create_request():
         genre = data.get('genre')
         callback_url = data.get('callback_url')
         
+        print(f"[INFO] リクエスト作成開始: genre={genre}, callback_url={callback_url}")
+        
         if not genre or not callback_url:
             return jsonify({'error': 'genre and callback_url are required'}), 400
         
@@ -157,7 +160,11 @@ def create_request():
         }
         
         print(f"[INFO] 新規リクエスト作成: {genre} - {request_id}")
+        print(f"[INFO] WebSocketで送信するデータ: {request_data}")
+        
         socketio.emit('new_request', request_data)
+        
+        print(f"[INFO] WebSocket送信完了")
         
         return jsonify({
             'status': 'created',
@@ -167,6 +174,8 @@ def create_request():
         
     except Exception as e:
         print(f"[ERROR] リクエスト作成エラー: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/pending-requests', methods=['GET'])
@@ -218,6 +227,47 @@ def lock_request():
         
     except Exception as e:
         print(f"[ERROR] ロックエラー: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/pc-response', methods=['POST'])
+def pc_response():
+    """PC側からの返答受信 (HTTP POST版)"""
+    try:
+        data = request.json
+        genre = data.get('genre')
+        request_id = data.get('request_id')
+        status = data.get('status')
+        pc_id = data.get('pc_id')
+        
+        print(f"[INFO] PC返答受信 (HTTP): {genre} - {request_id} = {status} (from {pc_id})")
+        
+        # データベース更新 (冪等性確保)
+        updated = database.update_request_status(genre, request_id, status, pc_id)
+        
+        if not updated:
+            print(f"[WARNING] 既に処理済み: {genre} - {request_id}")
+            return jsonify({'status': 'already_processed'}), 200
+        
+        # callback_urlを取得
+        request_data = database.get_request_detail(genre, request_id)
+        
+        if request_data:
+            # サブサーバーに通知
+            callback_data = {
+                'genre': genre,
+                'request_id': request_id,
+                'status': status,
+                'pc_id': pc_id
+            }
+            
+            send_callback(request_data['callback_url'], callback_data)
+        
+        return jsonify({'status': 'ok'}), 200
+        
+    except Exception as e:
+        print(f"[ERROR] 返答処理エラー: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 # ===========================
@@ -501,14 +551,14 @@ def handle_disconnect():
 
 @socketio.on('response')
 def handle_response(data):
-    """PC側から返答受信 (接続チェックのみ)"""
+    """PC側から返答受信 (WebSocket版 - 非推奨、HTTP版を使用)"""
     try:
         genre = data.get('genre')
         request_id = data.get('request_id')
         status = data.get('status')
         pc_id = data.get('pc_id')
         
-        print(f"[INFO] PC返答受信: {genre} - {request_id} = {status} (from {pc_id})")
+        print(f"[INFO] PC返答受信 (WebSocket): {genre} - {request_id} = {status} (from {pc_id})")
         
         # データベース更新 (冪等性確保)
         updated = database.update_request_status(genre, request_id, status, pc_id)
