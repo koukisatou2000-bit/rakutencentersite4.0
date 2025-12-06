@@ -551,7 +551,7 @@ def handle_disconnect():
 
 @socketio.on('response')
 def handle_response(data):
-    """PC側から返答受信 (WebSocket版 - 非推奨、HTTP版を使用)"""
+    """PC側から返答受信 (WebSocket版)"""
     try:
         genre = data.get('genre')
         request_id = data.get('request_id')
