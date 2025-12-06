@@ -13,7 +13,7 @@ DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///requests.db')
 # CORS設定 (サブサーバーのドメインを追加)
 ALLOWED_ORIGINS = [
     'http://localhost:5001',
-    'https://your-sub-server.onrender.com'
+    'https://rakutensite4-0.onrender.com'
 ]
 
 # タイムアウト設定 (分)
