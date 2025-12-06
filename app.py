@@ -1,7 +1,7 @@
 """
 本サーバーのメインアプリケーション
 """
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template_string, redirect, url_for
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 import requests
@@ -97,7 +97,18 @@ def index():
         <style>
             body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
             h1 { color: #333; }
-            .status { background: #f0f0f0; padding: 15px; border-radius: 5px; }
+            .status { background: #f0f0f0; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+            .links { margin-top: 20px; }
+            .links a {
+                display: inline-block;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 10px 20px;
+                text-decoration: none;
+                border-radius: 5px;
+                margin-right: 10px;
+            }
+            .links a:hover { opacity: 0.9; }
         </style>
     </head>
     <body>
@@ -107,6 +118,11 @@ def index():
             <p>このサーバーは本サーバー (Master Server) です。</p>
             <p>サブサーバーとPCの間でリクエストを中継します。</p>
         </div>
+        
+        <div class="links">
+            <a href="/admin">管理画面</a>
+        </div>
+        
         <h3>エンドポイント:</h3>
         <ul>
             <li>POST /api/request - リクエスト作成</li>
@@ -203,6 +219,271 @@ def lock_request():
     except Exception as e:
         print(f"[ERROR] ロックエラー: {e}")
         return jsonify({'error': str(e)}), 500
+
+# ===========================
+# 管理画面
+# ===========================
+
+@app.route('/admin')
+def admin():
+    """管理画面"""
+    html = '''
+    <!DOCTYPE html>
+    <html lang="ja">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>本サーバー管理画面</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                padding: 20px;
+            }
+            .container {
+                max-width: 800px;
+                margin: 0 auto;
+                background: white;
+                border-radius: 20px;
+                box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                padding: 40px;
+            }
+            h1 { color: #333; margin-bottom: 30px; }
+            .section {
+                background: #f8f9fa;
+                border-left: 4px solid #667eea;
+                padding: 20px;
+                margin-bottom: 20px;
+                border-radius: 5px;
+            }
+            .section h2 { color: #333; margin-bottom: 15px; font-size: 18px; }
+            .origin-list {
+                list-style: none;
+                margin-bottom: 15px;
+            }
+            .origin-item {
+                background: white;
+                padding: 10px;
+                margin: 5px 0;
+                border-radius: 5px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+            .origin-item button {
+                background: #dc3545;
+                color: white;
+                border: none;
+                padding: 5px 15px;
+                border-radius: 5px;
+                cursor: pointer;
+            }
+            .origin-item button:hover { background: #c82333; }
+            .add-form {
+                display: flex;
+                gap: 10px;
+            }
+            .add-form input {
+                flex: 1;
+                padding: 12px;
+                border: 1px solid #ddd;
+                border-radius: 5px;
+                font-size: 14px;
+            }
+            .add-form button {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border: none;
+                padding: 12px 30px;
+                border-radius: 5px;
+                cursor: pointer;
+                font-weight: bold;
+            }
+            .add-form button:hover { opacity: 0.9; }
+            .message {
+                padding: 15px;
+                margin-bottom: 20px;
+                border-radius: 5px;
+                display: none;
+            }
+            .message.success {
+                background: #d4edda;
+                border: 1px solid #c3e6cb;
+                color: #155724;
+                display: block;
+            }
+            .message.error {
+                background: #f8d7da;
+                border: 1px solid #f5c6cb;
+                color: #721c24;
+                display: block;
+            }
+            .back-link {
+                display: inline-block;
+                margin-bottom: 20px;
+                color: #667eea;
+                text-decoration: none;
+            }
+            .back-link:hover { text-decoration: underline; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <a href="/" class="back-link">← トップページに戻る</a>
+            
+            <h1>🔧 本サーバー管理画面</h1>
+            
+            <div id="message" class="message"></div>
+            
+            <div class="section">
+                <h2>📡 CORS許可オリジン</h2>
+                <p style="color: #666; margin-bottom: 15px; font-size: 14px;">
+                    サブサーバーのURLを追加すると、そのサーバーからのリクエストを受け付けるようになります。
+                </p>
+                
+                <ul class="origin-list" id="originList">
+                    {% for origin in origins %}
+                    <li class="origin-item">
+                        <span>{{ origin }}</span>
+                        {% if not origin.startswith('http://localhost') %}
+                        <button onclick="removeOrigin('{{ origin }}')">削除</button>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                
+                <div class="add-form">
+                    <input type="text" id="newOrigin" placeholder="https://your-sub-server.onrender.com" />
+                    <button onclick="addOrigin()">追加</button>
+                </div>
+            </div>
+        </div>
+        
+        <script>
+            function showMessage(text, type) {
+                const msg = document.getElementById('message');
+                msg.textContent = text;
+                msg.className = 'message ' + type;
+                setTimeout(() => {
+                    msg.className = 'message';
+                }, 3000);
+            }
+            
+            async function addOrigin() {
+                const input = document.getElementById('newOrigin');
+                const origin = input.value.trim();
+                
+                if (!origin) {
+                    showMessage('URLを入力してください', 'error');
+                    return;
+                }
+                
+                if (!origin.startsWith('http://') && !origin.startsWith('https://')) {
+                    showMessage('URLはhttp://またはhttps://で始まる必要があります', 'error');
+                    return;
+                }
+                
+                try {
+                    const response = await fetch('/admin/add-origin', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ origin: origin })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        showMessage('追加しました', 'success');
+                        input.value = '';
+                        setTimeout(() => location.reload(), 1000);
+                    } else {
+                        showMessage(data.error || '追加に失敗しました', 'error');
+                    }
+                } catch (error) {
+                    showMessage('エラー: ' + error.message, 'error');
+                }
+            }
+            
+            async function removeOrigin(origin) {
+                if (!confirm('本当に削除しますか?\\n' + origin)) return;
+                
+                try {
+                    const response = await fetch('/admin/remove-origin', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ origin: origin })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        showMessage('削除しました', 'success');
+                        setTimeout(() => location.reload(), 1000);
+                    } else {
+                        showMessage(data.error || '削除に失敗しました', 'error');
+                    }
+                } catch (error) {
+                    showMessage('エラー: ' + error.message, 'error');
+                }
+            }
+        </script>
+    </body>
+    </html>
+    '''
+    return render_template_string(html, origins=ALLOWED_ORIGINS)
+
+@app.route('/admin/add-origin', methods=['POST'])
+def add_origin():
+    """オリジンを追加"""
+    try:
+        data = request.json
+        origin = data.get('origin', '').strip()
+        
+        if not origin:
+            return jsonify({'success': False, 'error': 'URLが空です'})
+        
+        if origin in ALLOWED_ORIGINS:
+            return jsonify({'success': False, 'error': '既に追加されています'})
+        
+        ALLOWED_ORIGINS.append(origin)
+        
+        # CORSを更新
+        app.config['CORS_ORIGINS'] = ALLOWED_ORIGINS
+        
+        print(f"[INFO] オリジン追加: {origin}")
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        print(f"[ERROR] オリジン追加エラー: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/admin/remove-origin', methods=['POST'])
+def remove_origin():
+    """オリジンを削除"""
+    try:
+        data = request.json
+        origin = data.get('origin', '').strip()
+        
+        if origin not in ALLOWED_ORIGINS:
+            return jsonify({'success': False, 'error': '存在しません'})
+        
+        # localhost以外は削除可能
+        if origin.startswith('http://localhost'):
+            return jsonify({'success': False, 'error': 'localhostは削除できません'})
+        
+        ALLOWED_ORIGINS.remove(origin)
+        
+        # CORSを更新
+        app.config['CORS_ORIGINS'] = ALLOWED_ORIGINS
+        
+        print(f"[INFO] オリジン削除: {origin}")
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        print(f"[ERROR] オリジン削除エラー: {e}")
+        return jsonify({'success': False, 'error': str(e)})
 
 # ===========================
 # WebSocketイベント
