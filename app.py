@@ -9,6 +9,10 @@ from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 import database
 from config import SECRET_KEY, DEBUG, ALLOWED_ORIGINS
+import logging
+
+# ロギング設定
+logging.basicConfig(level=logging.DEBUG)
 
 # Flaskアプリ初期化
 app = Flask(__name__)
@@ -16,7 +20,7 @@ app.config['SECRET_KEY'] = SECRET_KEY
 CORS(app, origins=ALLOWED_ORIGINS)
 
 # Socket.IO初期化
-socketio = SocketIO(app, cors_allowed_origins=ALLOWED_ORIGINS)
+socketio = SocketIO(app, cors_allowed_origins=ALLOWED_ORIGINS, logger=True, engineio_logger=True)
 
 # データベース初期化
 database.init_db()
@@ -552,6 +556,9 @@ def handle_disconnect():
 @socketio.on('response')
 def handle_response(data):
     """PC側から返答受信 (WebSocket版)"""
+    print(f"[DEBUG] ========== response イベント受信 ==========")
+    print(f"[DEBUG] 受信データ: {data}")
+    
     try:
         genre = data.get('genre')
         request_id = data.get('request_id')
@@ -567,8 +574,12 @@ def handle_response(data):
             print(f"[WARNING] 既に処理済み: {genre} - {request_id}")
             return
         
+        print(f"[DEBUG] データベース更新成功")
+        
         # callback_urlを取得
         request_data = database.get_request_detail(genre, request_id)
+        
+        print(f"[DEBUG] リクエスト詳細: {request_data}")
         
         if request_data:
             # サブサーバーに通知
@@ -579,10 +590,17 @@ def handle_response(data):
                 'pc_id': pc_id
             }
             
+            print(f"[DEBUG] コールバック準備完了")
             send_callback(request_data['callback_url'], callback_data)
+        else:
+            print(f"[ERROR] リクエスト詳細が取得できません")
+        
+        print(f"[DEBUG] ========== response イベント処理完了 ==========")
         
     except Exception as e:
         print(f"[ERROR] 返答処理エラー: {e}")
+        import traceback
+        traceback.print_exc()
 
 # ===========================
 # メイン処理
