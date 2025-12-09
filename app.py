@@ -10,9 +10,10 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import database
 from config import SECRET_KEY, DEBUG, ALLOWED_ORIGINS
 import logging
+import time
 
 # ロギング設定
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 # Flaskアプリ初期化
 app = Flask(__name__)
@@ -60,29 +61,50 @@ scheduler.start()
 # ヘルパー関数
 # ===========================
 
-def send_callback(callback_url, data, max_retries=1):
+def send_callback(callback_url, data, max_retries=3):
     """サブサーバーにコールバック送信 (リトライ付き)"""
     for attempt in range(max_retries + 1):
         try:
-            print(f"[INFO] コールバック送信: {callback_url} - {data}")
-            response = requests.post(callback_url, json=data, timeout=5)
+            print(f"[INFO] コールバック送信試行 {attempt + 1}/{max_retries + 1}: {callback_url}")
+            print(f"[DEBUG] 送信データ: {data}")
+            
+            response = requests.post(
+                callback_url, 
+                json=data, 
+                timeout=10,
+                headers={'Content-Type': 'application/json'}
+            )
+            
+            print(f"[DEBUG] コールバックレスポンス: status={response.status_code}")
             
             if response.status_code == 200:
                 print(f"[INFO] コールバック送信成功")
                 return True
             else:
-                print(f"[WARNING] コールバック送信失敗: status={response.status_code}")
+                print(f"[WARNING] コールバック送信失敗: status={response.status_code}, body={response.text}")
                 
-        except Exception as e:
-            print(f"[ERROR] コールバック送信エラー: {e}")
+        except requests.exceptions.Timeout as e:
+            print(f"[ERROR] コールバック送信タイムアウト: {e}")
             
-            if attempt < max_retries:
-                print(f"[INFO] リトライ {attempt + 1}/{max_retries}")
-                import time
-                time.sleep(2)
-            else:
-                print(f"[ERROR] コールバック送信失敗 (最終)")
-                return False
+        except requests.exceptions.ConnectionError as e:
+            print(f"[ERROR] コールバック送信接続エラー: {e}")
+            
+        except requests.exceptions.RequestException as e:
+            print(f"[ERROR] コールバック送信エラー: {e}")
+        
+        except Exception as e:
+            print(f"[ERROR] 予期しないエラー: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # リトライする場合
+        if attempt < max_retries:
+            wait_time = 2 ** attempt  # 指数バックオフ: 1秒, 2秒, 4秒
+            print(f"[INFO] {wait_time}秒後にリトライします...")
+            time.sleep(wait_time)
+        else:
+            print(f"[ERROR] コールバック送信失敗 (最終試行)")
+            return False
     
     return False
 
