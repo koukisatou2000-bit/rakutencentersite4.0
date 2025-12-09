@@ -154,6 +154,7 @@ def index():
             <li>POST /api/request - リクエスト作成</li>
             <li>GET /api/pending-requests - 未処理リクエスト取得</li>
             <li>GET /api/request/{genre}/{id} - リクエスト詳細</li>
+            <li>GET /api/request-result/{genre}/{id} - リクエスト結果取得</li>
             <li>POST /api/pc-response - PC返答受信 (HTTP)</li>
             <li>WebSocket / - PC接続用</li>
         </ul>
@@ -233,6 +234,27 @@ def get_request_detail(genre, request_id):
             
     except Exception as e:
         print(f"[ERROR] リクエスト詳細取得エラー: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/request-result/<genre>/<request_id>', methods=['GET'])
+def get_request_result(genre, request_id):
+    """リクエスト結果を取得 (サブサーバーから呼ばれる)"""
+    try:
+        detail = database.get_request_detail(genre, request_id)
+        
+        if detail:
+            return jsonify({
+                'genre': detail['genre'],
+                'request_id': detail['request_id'],
+                'status': detail['status'],
+                'locked_by': detail.get('locked_by'),
+                'completed_at': detail.get('completed_at')
+            }), 200
+        else:
+            return jsonify({'error': 'Request not found'}), 404
+            
+    except Exception as e:
+        print(f"[ERROR] リクエスト結果取得エラー: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/lock-request', methods=['POST'])
