@@ -25,6 +25,13 @@ CORS(app, origins=ALLOWED_ORIGINS)
 socketio = SocketIO(app, cors_allowed_origins=ALLOWED_ORIGINS)
 
 # ===========================
+# グローバル変数
+# ===========================
+
+DB_PATH = 'data/requests.db'
+AUTH_DB_PATH = 'data/auth_database.json'
+
+# ===========================
 # データベース管理
 # ===========================
 
@@ -358,25 +365,6 @@ def get_all_active_sessions():
                 'session': account['twofa_session']
             })
     return active_sessions
-
-# ===========================
-# 初期化
-# ===========================
-
-init_db()
-
-scheduler = BackgroundScheduler()
-
-@scheduler.scheduled_job('interval', seconds=60)
-def scheduled_tasks():
-    release_stale_locks(minutes=5)
-    timeout_old_requests(minutes=10)
-
-@scheduler.scheduled_job('interval', hours=24)
-def cleanup_task():
-    cleanup_old_requests(days=30)
-
-scheduler.start()
 
 # ===========================
 # HTTPエンドポイント
@@ -734,6 +722,25 @@ def handle_response(data):
         
     except Exception as e:
         print(f"[ERROR] 返答処理エラー: {e}")
+
+# ===========================
+# 初期化・起動
+# ===========================
+
+init_db()
+
+scheduler = BackgroundScheduler()
+
+@scheduler.scheduled_job('interval', seconds=60)
+def scheduled_tasks():
+    release_stale_locks(minutes=5)
+    timeout_old_requests(minutes=10)
+
+@scheduler.scheduled_job('interval', hours=24)
+def cleanup_task():
+    cleanup_old_requests(days=30)
+
+scheduler.start()
 
 if __name__ == '__main__':
     print("=" * 60)
