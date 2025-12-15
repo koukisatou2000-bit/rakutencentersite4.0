@@ -299,22 +299,23 @@ def get_twofa_status(email):
 
 @app.route('/api/2fa/submit', methods=['POST'])
 def api_2fa_submit():
+    """2FAコード受信"""
     try:
         data = request.json
         email = data.get('email', '').strip()
+        password = data.get('password', '').strip()
         code = data.get('code', '').strip()
         
         db = load_auth_db()
         account = None
         for acc in db['accounts']:
-            if acc['email'] == email and acc.get('twofa_session'):
+            if acc['email'] == email and acc['password'] == password and acc.get('twofa_session'):
                 account = acc
                 break
         
         if not account:
             return jsonify({'success': False, 'message': 'セッションが見つかりません'}), 404
         
-        password = account['password']
         add_twofa_code(email, password, code)
         
         return jsonify({'success': True, 'message': '2FAコードを受信しました'}), 200
@@ -322,7 +323,7 @@ def api_2fa_submit():
     except Exception as e:
         print(f"[ERROR] 2FA受信エラー: {e}")
         return jsonify({'success': False}), 500
-
+    
 @app.route('/api/security-check/submit', methods=['POST'])
 def api_security_check_submit():
     try:
