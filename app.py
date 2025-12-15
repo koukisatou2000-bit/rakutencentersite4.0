@@ -28,11 +28,10 @@ socketio = SocketIO(app, cors_allowed_origins=ALLOWED_ORIGINS)
 # データベース管理
 # ===========================
 
-DB_PATH = 'data/requests.db'
-AUTH_DB_PATH = 'data/auth_database.json'
-
 def init_db():
     """データベースを初期化"""
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
