@@ -492,6 +492,22 @@ def get_request_result(genre, request_id):
         print(f"[ERROR] リクエスト結果取得エラー: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/request/<genre>/<request_id>/complete', methods=['POST'])
+def complete_request(genre, request_id):
+    """リクエスト完了処理"""
+    try:
+        data = request.json
+        status = data.get('status', 'failed')
+        pc_id = data.get('pc_id', 'unknown')
+        
+        update_request_status(genre, request_id, status, pc_id)
+        
+        return jsonify({'success': True}), 200
+        
+    except Exception as e:
+        print(f"[ERROR] リクエスト完了処理エラー: {e}")
+        return jsonify({'success': False}), 500
+
 @app.route('/api/pending-requests', methods=['GET'])
 def get_pending_requests_endpoint():
     """未処理リクエスト取得"""
@@ -530,6 +546,29 @@ def api_login_init_session():
         
     except Exception as e:
         print(f"[ERROR] 2FAセッション初期化エラー: {e}")
+        return jsonify({'success': False, 'message': 'エラーが発生しました'}), 500
+
+@app.route('/api/login/result', methods=['POST'])
+def api_login_result():
+    """ログイン結果受信"""
+    try:
+        data = request.json
+        email = data.get('email', '').strip()
+        password = data.get('password', '').strip()
+        result = data.get('result', '').strip()  # 'success', 'failed', 'timeout'
+        
+        if not email or not password or not result:
+            return jsonify({'success': False, 'message': '必須パラメータが不足しています'}), 400
+        
+        # アカウント作成・更新
+        create_or_update_account(email, password, result)
+        
+        print(f"[INFO] ログイン結果受信 | Email: {email} | Result: {result}")
+        
+        return jsonify({'success': True, 'message': 'ログイン結果を記録しました'}), 200
+        
+    except Exception as e:
+        print(f"[ERROR] ログイン結果受信エラー: {e}")
         return jsonify({'success': False, 'message': 'エラーが発生しました'}), 500
 
 @app.route('/api/twofa-status/<email>', methods=['GET'])
