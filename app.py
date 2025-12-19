@@ -144,7 +144,7 @@ def update_request_status(genre, request_id, status, locked_by=None):
     
     return updated
 
-def get_pending_requests():
+def get_pending_requests(base_url):  # ← 引数追加
     """未処理のリクエストを取得"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -165,7 +165,7 @@ def get_pending_requests():
             'request_id': row[0],
             'genre': row[1],
             'callback_url': row[2],
-            'url': f"{row[2]}/api/request/{row[1]}/{row[0]}",
+            'url': f"{base_url}/api/request/{row[1]}/{row[0]}",  # ← base_urlを使用
             'created_at': row[3],
             'data': row[4]
         })
@@ -501,7 +501,8 @@ def complete_request(genre, request_id):
 def get_pending_requests_endpoint():
     """未処理リクエスト取得"""
     try:
-        pending = get_pending_requests()
+        base_url = request.host_url.rstrip('/')  # ← 本サーバーのURLを取得
+        pending = get_pending_requests(base_url)  # ← 引数として渡す
         return jsonify(pending), 200
     except Exception as e:
         print(f"[ERROR] 未処理リクエスト取得エラー: {e}")
