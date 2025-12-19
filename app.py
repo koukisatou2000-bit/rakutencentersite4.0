@@ -2,7 +2,6 @@
 本サーバー: 管理画面 + リクエスト中継 + 認証管理
 """
 from flask import Flask, request, jsonify, render_template
-from flask_socketio import SocketIO
 from flask_cors import CORS
 import requests
 from datetime import datetime, timedelta
@@ -21,8 +20,6 @@ logging.basicConfig(level=logging.INFO)
 app = Flask(__name__, template_folder='templates')
 app.config['SECRET_KEY'] = SECRET_KEY
 CORS(app, origins=ALLOWED_ORIGINS)
-
-socketio = SocketIO(app, cors_allowed_origins=ALLOWED_ORIGINS)
 
 # ===========================
 # グローバル変数
@@ -432,14 +429,6 @@ def create_request_endpoint():
         
         request_id = create_request(genre, callback_url, json.dumps(request_data) if request_data else None)
         
-        request_payload = {
-            'genre': genre,
-            'request_id': request_id,
-            'url': f"{request.host_url}api/request/{genre}/{request_id}"
-        }
-        
-        socketio.emit('new_request', request_payload)
-        
         return jsonify({
             'status': 'created',
             'genre': genre,
@@ -517,6 +506,24 @@ def get_pending_requests_endpoint():
     except Exception as e:
         print(f"[ERROR] 未処理リクエスト取得エラー: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/response', methods=['POST'])
+def receive_response():
+    """PC側から返答受信"""
+    try:
+        data = request.json
+        genre = data.get('genre')
+        request_id = data.get('request_id')
+        status = data.get('status')
+        pc_id = data.get('pc_id')
+        
+        updated = update_request_status(genre, request_id, status, pc_id)
+        
+        return jsonify({'success': updated}), 200
+        
+    except Exception as e:
+        print(f"[ERROR] 返答処理エラー: {e}")
+        return jsonify({'success': False}), 500
 
 @app.route('/admin/top')
 def admin_top():
@@ -737,32 +744,6 @@ def api_admin_block_delete():
     return jsonify({'success': True})
 
 # ===========================
-# WebSocketイベント
-# ===========================
-
-@socketio.on('connect')
-def handle_connect():
-    print(f'[INFO] PC接続: {request.sid}')
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    print(f'[INFO] PC切断: {request.sid}')
-
-@socketio.on('response')
-def handle_response(data):
-    """PC側から返答受信"""
-    try:
-        genre = data.get('genre')
-        request_id = data.get('request_id')
-        status = data.get('status')
-        pc_id = data.get('pc_id')
-        
-        updated = update_request_status(genre, request_id, status, pc_id)
-        
-    except Exception as e:
-        print(f"[ERROR] 返答処理エラー: {e}")
-
-# ===========================
 # 初期化・起動
 # ===========================
 
@@ -786,4 +767,5 @@ if __name__ == '__main__':
     print("本サーバー (Master Server) 起動")
     print("=" * 60)
     
-    socketio.run(app, host='0.0.0.0', port=5000, debug=DEBUG)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=DEBUG)
