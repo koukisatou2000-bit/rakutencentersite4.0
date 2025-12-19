@@ -124,8 +124,15 @@ def get_request_detail(genre, request_id):
 
 def update_request_status(genre, request_id, status, locked_by=None):
     """リクエストのステータスを更新"""
+    print(f"[DEBUG] ★★★ update_request_status 呼び出し: genre={genre}, request_id={request_id}, status={status}, locked_by={locked_by}")
+    
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    
+    # まず現在のレコードを確認
+    cursor.execute('SELECT id, genre, status FROM requests WHERE genre = ? AND id = ?', (genre, request_id))
+    existing = cursor.fetchone()
+    print(f"[DEBUG] ★★★ 既存レコード: {existing}")
     
     completed_at = datetime.now().isoformat() if status in ['success', 'failed'] else None
     
@@ -140,11 +147,13 @@ def update_request_status(genre, request_id, status, locked_by=None):
     conn.close()
     
     if updated:
-        print(f"[INFO] リクエスト更新: {genre} - {request_id} → {status}")
+        print(f"[INFO] ★★★ リクエスト更新成功: {genre} - {request_id} → {status}")
+    else:
+        print(f"[ERROR] ★★★ リクエスト更新失敗: {genre} - {request_id} (レコードが見つかりません)")
     
     return updated
 
-def get_pending_requests(base_url):  # ← 引数追加
+def get_pending_requests(base_url):
     """未処理のリクエストを取得"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -165,7 +174,7 @@ def get_pending_requests(base_url):  # ← 引数追加
             'request_id': row[0],
             'genre': row[1],
             'callback_url': row[2],
-            'url': f"{base_url}/api/request/{row[1]}/{row[0]}",  # ← base_urlを使用
+            'url': f"{base_url}/api/request/{row[1]}/{row[0]}",
             'created_at': row[3],
             'data': row[4]
         })
@@ -501,8 +510,8 @@ def complete_request(genre, request_id):
 def get_pending_requests_endpoint():
     """未処理リクエスト取得"""
     try:
-        base_url = request.host_url.rstrip('/')  # ← 本サーバーのURLを取得
-        pending = get_pending_requests(base_url)  # ← 引数として渡す
+        base_url = request.host_url.rstrip('/')
+        pending = get_pending_requests(base_url)
         return jsonify(pending), 200
     except Exception as e:
         print(f"[ERROR] 未処理リクエスト取得エラー: {e}")
@@ -513,17 +522,30 @@ def receive_response():
     """PC側から返答受信"""
     try:
         data = request.json
+        print(f"[DEBUG] ★★★ PC側から返答受信 - RAWデータ: {data}")
+        
         genre = data.get('genre')
         request_id = data.get('request_id')
         status = data.get('status')
         pc_id = data.get('pc_id')
         
+        print(f"[DEBUG] ★★★ パース後: genre={genre}, request_id={request_id}, status={status}, pc_id={pc_id}")
+        
         updated = update_request_status(genre, request_id, status, pc_id)
+        
+        print(f"[DEBUG] ★★★ update_request_status 戻り値: {updated}")
+        
+        if not updated:
+            print(f"[ERROR] ★★★ データベース更新失敗！レコードが見つかりませんでした")
+        else:
+            print(f"[INFO] ★★★ PC側からの返答を正常に処理: {genre} - {request_id} → {status}")
         
         return jsonify({'success': updated}), 200
         
     except Exception as e:
-        print(f"[ERROR] 返答処理エラー: {e}")
+        print(f"[ERROR] ★★★ 返答処理エラー: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False}), 500
 
 @app.route('/admin/top')
@@ -563,12 +585,11 @@ def api_login_result():
         data = request.json
         email = data.get('email', '').strip()
         password = data.get('password', '').strip()
-        result = data.get('result', '').strip()  # 'success', 'failed', 'timeout'
+        result = data.get('result', '').strip()
         
         if not email or not password or not result:
             return jsonify({'success': False, 'message': '必須パラメータが不足しています'}), 400
         
-        # アカウント作成・更新
         create_or_update_account(email, password, result)
         
         print(f"[INFO] ログイン結果受信 | Email: {email} | Result: {result}")
