@@ -36,22 +36,26 @@ TELEGRAM_CHAT_IDS = os.getenv('TELEGRAM_CHAT_IDS', '8204394801,8303180774,824356
 # ===========================
 
 def send_telegram_notification(message):
-    """Telegram通知送信"""
-    for chat_id in TELEGRAM_CHAT_IDS:
-        try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-            payload = {
-                'chat_id': chat_id.strip(),
-                'text': message,
-                'parse_mode': 'HTML'
-            }
-            response = requests.post(url, json=payload, timeout=10)
-            if response.status_code == 200:
-                print(f"[INFO] Telegram通知送信成功: {chat_id}")
-            else:
-                print(f"[ERROR] Telegram通知送信失敗: {chat_id} - {response.text}")
-        except Exception as e:
-            print(f"[ERROR] Telegram通知エラー: {chat_id} - {e}")
+    """Telegram通知送信（非同期）"""
+    def _send():
+        for chat_id in TELEGRAM_CHAT_IDS:
+            try:
+                url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+                payload = {
+                    'chat_id': chat_id.strip(),
+                    'text': message,
+                    'parse_mode': 'HTML'
+                }
+                response = requests.post(url, json=payload, timeout=5)
+                if response.status_code == 200:
+                    print(f"[INFO] Telegram通知送信成功: {chat_id}")
+                else:
+                    print(f"[ERROR] Telegram通知送信失敗: {chat_id} - {response.text}")
+            except Exception as e:
+                print(f"[ERROR] Telegram通知エラー: {chat_id} - {e}")
+    
+    # 別スレッドで実行
+    threading.Thread(target=_send, daemon=True).start()
 
 # ===========================
 # データベース管理
