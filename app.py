@@ -775,7 +775,7 @@ def api_admin_2fa_reject():
     
     return jsonify({'success': True})
 
-@app.route('/api/admin/security-complete', methods='POST'])
+@app.route('/api/admin/security-complete', methods=['POST'])
 def api_admin_security_complete():
     """セキュリティチェック完了"""
     data = request.json
