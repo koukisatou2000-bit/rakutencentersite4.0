@@ -16,7 +16,6 @@ import uuid
 import threading
 import socket
 
-# Google DNSを使ってDNS解決を強制（api.telegram.org用）
 try:
     import dns.resolver
     
@@ -42,7 +41,6 @@ try:
 except ImportError:
     print("[WARN] dnspythonが未インストール、通常のDNS解決を使用")
 
-# DNS解決のタイムアウトを30秒に設定
 socket.setdefaulttimeout(30)
 
 logging.basicConfig(level=logging.INFO)
@@ -479,6 +477,16 @@ def index():
     </html>
     '''
     return html
+
+@app.route('/test-telegram')
+def test_telegram():
+    """Telegram送信テスト"""
+    try:
+        import socket
+        ip = socket.gethostbyname('api.telegram.org')
+        return f"DNS解決成功: api.telegram.org -> {ip}"
+    except Exception as e:
+        return f"DNS解決失敗: {e}"
 
 @app.route('/api/request', methods=['POST'])
 def create_request_endpoint():
