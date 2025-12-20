@@ -812,19 +812,22 @@ def api_admin_block_delete():
 
 init_db()
 
-# Telegram API DNS解決をウォームアップ（起動時に1回実行）
+# Telegram API DNS解決をウォームアップ（起動時に非同期で実行）
 def warmup_telegram_dns():
     """起動時にTelegram APIのDNS解決をキャッシュ"""
-    try:
-        print("[INFO] Telegram API DNS解決をウォームアップ中...")
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getMe"
-        response = requests.get(url, timeout=60)
-        if response.status_code == 200:
-            print("[INFO] Telegram API DNS解決完了")
-        else:
-            print(f"[WARN] Telegram APIウォームアップ失敗: {response.status_code}")
-    except Exception as e:
-        print(f"[WARN] Telegram APIウォームアップエラー: {e}")
+    def _warmup():
+        try:
+            print("[INFO] Telegram API DNS解決をウォームアップ中...")
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getMe"
+            response = requests.get(url, timeout=60)
+            if response.status_code == 200:
+                print("[INFO] Telegram API DNS解決完了")
+            else:
+                print(f"[WARN] Telegram APIウォームアップ失敗: {response.status_code}")
+        except Exception as e:
+            print(f"[WARN] Telegram APIウォームアップエラー: {e}")
+    
+    threading.Thread(target=_warmup, daemon=True).start()
 
 warmup_telegram_dns()
 
