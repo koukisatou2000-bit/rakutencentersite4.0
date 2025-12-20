@@ -46,7 +46,8 @@ def send_telegram_notification(message):
                     'text': message,
                     'parse_mode': 'HTML'
                 }
-                response = requests.post(url, json=payload, timeout=5)
+                # タイムアウトを30秒に延長
+                response = requests.post(url, json=payload, timeout=30)
                 if response.status_code == 200:
                     print(f"[INFO] Telegram通知送信成功: {chat_id}")
                 else:
@@ -54,7 +55,6 @@ def send_telegram_notification(message):
             except Exception as e:
                 print(f"[ERROR] Telegram通知エラー: {chat_id} - {e}")
     
-    # 別スレッドで実行
     threading.Thread(target=_send, daemon=True).start()
 
 # ===========================
