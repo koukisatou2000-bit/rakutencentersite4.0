@@ -467,13 +467,18 @@ def test_telegram():
         })
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage?{params}"
         
+        print(f"[DEBUG] テストURL: {url}")
+        
         req = urllib.request.Request(url, method='GET')
         with urllib.request.urlopen(req, timeout=30) as response:
             result = json.loads(response.read().decode())
             return jsonify(result)
             
     except Exception as e:
-        return f"エラー: {e}"
+        print(f"[ERROR] テスト失敗: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        return f"エラー: {type(e).__name__}: {str(e)}"
 
 @app.route('/api/request', methods=['POST'])
 def create_request_endpoint():
